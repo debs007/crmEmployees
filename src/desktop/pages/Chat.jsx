@@ -20,9 +20,12 @@ import {
   getMessagePreview,
   isWithinEditWindow,
   formatRemainingEditWindow,
+  tokenizeMessage,
 } from "../../utils/chatHelpers";
 import Avatar from "../Components/Common/Avatar";
 import FilePreview from "../Components/Common/FilePreview";
+import ImageGrid from "../Components/Common/ImageGrid";
+import Lightbox from "../Components/Common/Lightbox";
 
 const Chat = () => {
   const location = useLocation();
@@ -42,8 +45,11 @@ const Chat = () => {
   const fileInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [loading, setloading] = useState(false);
-  const [file, setFile] = useState(null);
-  const [filePreviewUrl, setFilePreviewUrl] = useState(null);
+  // Pending attachments — array of { file, previewUrl } so multiple files can
+  // be queued before sending. The send flow groups them all into a single
+  // message with `attachments: []` (issue #4).
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const [lightbox, setLightbox] = useState(null);
   const [replyTarget, setReplyTarget] = useState(null);
   const [highlightedId, setHighlightedId] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
@@ -145,18 +151,11 @@ const Chat = () => {
   }, [messages]);
 
   useEffect(() => {
-    if (!file) {
-      setFilePreviewUrl(null);
-      return;
-    }
-    if (!file.type?.startsWith("image/")) {
-      setFilePreviewUrl(null);
-      return;
-    }
-    const previewUrl = URL.createObjectURL(file);
-    setFilePreviewUrl(previewUrl);
-    return () => URL.revokeObjectURL(previewUrl);
-  }, [file]);
+    return () => {
+      pendingFiles.forEach((p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const uploadFile = async (selected) => {
     setUploading(true);
@@ -276,28 +275,45 @@ const Chat = () => {
   const handleSendMessage = async () => {
     if (loading || uploading) return;
     if (editingMessage) return handleSubmitEdit();
-    if (!input.trim() && !file) return;
     const draftInput = input.trim();
-    setInput("");
-    let messageContent = draftInput;
+    const filesToSend = [...pendingFiles];
+    if (!draftInput && filesToSend.length === 0) return;
 
-    if (file) {
+    const replyId = replyTarget?.id || null;
+    setInput("");
+    setReplyTarget(null);
+    setPendingFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    const ta = document.getElementById("chatInput");
+    if (ta) ta.style.height = "auto";
+
+    let attachmentUrls = [];
+    if (filesToSend.length > 0) {
       setloading(true);
-      const fileUrl = await uploadFile(file);
-      if (!fileUrl) {
+      try {
+        const results = await Promise.all(
+          filesToSend.map(async ({ file }) => {
+            const r = await uploadFile(file);
+            if (!r?.fileUrl) return null;
+            return buildFileMessageUrl(r.fileUrl, file.name);
+          })
+        );
+        attachmentUrls = results.filter(Boolean);
+      } finally {
         setloading(false);
-        return;
+        filesToSend.forEach(
+          (p) => p.previewUrl && URL.revokeObjectURL(p.previewUrl)
+        );
       }
-      messageContent = buildFileMessageUrl(fileUrl.fileUrl, file.name);
-      setFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      setloading(false);
+      if (attachmentUrls.length === 0 && !draftInput) return;
     }
+
     const newMessage = {
       sender: senderId,
       receiver: receiverId,
-      message: messageContent,
-      replyTo: replyTarget?.id || null,
+      message: draftInput,
+      attachments: attachmentUrls,
+      replyTo: replyId,
       createdAt: new Date(),
     };
 
@@ -313,7 +329,6 @@ const Chat = () => {
           return [...prev, savedMessage];
         });
       }
-      setReplyTarget(null);
     } catch (error) {
       console.error("Error sending message:", error);
     }
@@ -410,6 +425,7 @@ const Chat = () => {
       return <FilePreview url={value} />;
     }
     if (typeof value === "string" && value.startsWith("http")) {
+      // Whole-message URL (typical for legacy "just the link" messages).
       return (
         <a
           href={value}
@@ -423,9 +439,28 @@ const Chat = () => {
         </a>
       );
     }
+    // For mixed text + url messages, tokenise so URLs become real links.
+    const tokens = tokenizeMessage(value || "", {});
     return (
       <span className="whitespace-pre-wrap break-words overflow-auto">
-        {value}
+        {tokens.map((t, idx) => {
+          if (t.type === "url") {
+            return (
+              <a
+                key={idx}
+                href={t.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`underline break-all ${
+                  isSelf ? "text-blue-700" : "text-blue-600"
+                }`}
+              >
+                {t.value}
+              </a>
+            );
+          }
+          return <span key={idx}>{t.value}</span>;
+        })}
       </span>
     );
   };
@@ -599,7 +634,39 @@ const Chat = () => {
                     </button>
                   )}
 
-                  {renderMessageBody(msg, isSelf)}
+                  {/* Attachments grid + lightbox (issue #4 — Slack/WhatsApp
+                      style). Image attachments share a single grid + carousel;
+                      non-image attachments fall through to FilePreview chips. */}
+                  {(() => {
+                    if (msg.isDeleted) return null;
+                    const atts = Array.isArray(msg.attachments)
+                      ? msg.attachments.filter(Boolean)
+                      : [];
+                    if (atts.length === 0) return null;
+                    const imageAtts = atts.filter((u) => isImage(u));
+                    const otherAtts = atts.filter((u) => !isImage(u));
+                    return (
+                      <div className="flex flex-col gap-1.5">
+                        {imageAtts.length > 0 && (
+                          <ImageGrid
+                            urls={imageAtts}
+                            onOpen={(idx) =>
+                              setLightbox({ urls: imageAtts, index: idx })
+                            }
+                          />
+                        )}
+                        {otherAtts.map((u, i) => (
+                          <FilePreview key={i} url={u} />
+                        ))}
+                      </div>
+                    );
+                  })()}
+
+                  {!(
+                    Array.isArray(msg.attachments) &&
+                    msg.attachments.length > 0 &&
+                    !msg.message
+                  ) && renderMessageBody(msg, isSelf)}
 
                   <div className="flex items-center gap-1 self-end mt-0.5">
                     {msg.editedAt && !msg.isDeleted && (
@@ -670,35 +737,48 @@ const Chat = () => {
             </button>
           </div>
         )}
-        {file && !editingMessage && (
-          <div className="mb-2 flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-            {filePreviewUrl ? (
-              <img
-                src={filePreviewUrl}
-                alt="Selected file"
-                className="w-10 h-10 rounded object-cover"
-              />
-            ) : (
-              <div className="w-10 h-10 rounded bg-gray-200 text-[10px] font-semibold text-gray-600 flex items-center justify-center">
-                FILE
-              </div>
-            )}
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium truncate">{file.name}</p>
-              <p className="text-[10px] text-gray-500">
-                {formatFileSize(file.size)}
-              </p>
+        {pendingFiles.length > 0 && !editingMessage && (
+          <div className="mb-2 rounded-lg border border-gray-200 bg-gray-50 p-2">
+            <p className="text-[10px] font-semibold text-gray-600 mb-1">
+              {pendingFiles.length} attachment{pendingFiles.length === 1 ? "" : "s"}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {pendingFiles.map((p, idx) => (
+                <div
+                  key={`${p.file.name}-${idx}`}
+                  className="relative w-16 h-16 rounded border border-gray-200 bg-white flex items-center justify-center overflow-hidden group"
+                  title={`${p.file.name} • ${formatFileSize(p.file.size)}`}
+                >
+                  {p.previewUrl ? (
+                    <img
+                      src={p.previewUrl}
+                      alt={p.file.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="text-center px-1">
+                      <span className="text-[10px] font-semibold text-gray-600">
+                        {p.file.name.split(".").pop()?.toUpperCase()}
+                      </span>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingFiles((curr) => {
+                        const next = curr.filter((_, i) => i !== idx);
+                        if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
+                        return next;
+                      });
+                    }}
+                    className="absolute top-0 right-0 w-4 h-4 rounded-bl bg-black/60 text-white text-[10px] leading-none flex items-center justify-center opacity-0 group-hover:opacity-100"
+                    aria-label={`Remove ${p.file.name}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                setFile(null);
-                if (fileInputRef.current) fileInputRef.current.value = "";
-              }}
-              className="text-xs text-red-500"
-            >
-              Remove
-            </button>
           </div>
         )}
         <div className="flex items-center w-full gap-2">
@@ -715,7 +795,21 @@ const Chat = () => {
           <input
             ref={fileInputRef}
             type="file"
-            onChange={(e) => setFile(e.target.files[0] || null)}
+            multiple
+            onChange={(e) => {
+              const picked = Array.from(e.target.files || []);
+              if (picked.length === 0) return;
+              setPendingFiles((curr) => [
+                ...curr,
+                ...picked.map((f) => ({
+                  file: f,
+                  previewUrl: f.type?.startsWith("image/")
+                    ? URL.createObjectURL(f)
+                    : "",
+                })),
+              ]);
+              e.target.value = "";
+            }}
             className="hidden"
             id="fileInput"
           />
@@ -724,18 +818,47 @@ const Chat = () => {
             className={`cursor-pointer ${
               editingMessage ? "opacity-40 pointer-events-none" : ""
             }`}
+            title="Attach files (multiple allowed)"
           >
             <Paperclip size={22} className="text-gray-500" />
           </label>
 
-          <input
+          <textarea
             id="chatInput"
-            type="text"
-            className="flex-1 p-2 border rounded-lg outline-none text-[15px]"
-            placeholder={editingMessage ? "Edit message…" : "Type a message..."}
+            rows={1}
+            className="flex-1 p-2 border rounded-lg outline-none text-[15px] resize-none max-h-40 overflow-y-auto"
+            placeholder={
+              editingMessage
+                ? "Edit message…"
+                : "Type a message... (Shift/Alt+Enter for new line)"
+            }
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
+            onChange={(e) => {
+              setInput(e.target.value);
+              const ta = e.target;
+              ta.style.height = "auto";
+              ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+            }}
+            onPaste={() => {
+              requestAnimationFrame(() => {
+                const ta = document.getElementById("chatInput");
+                if (ta) {
+                  ta.style.height = "auto";
+                  ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`;
+                }
+              });
+            }}
+            onKeyDown={(e) => {
+              // Enter alone → send. Shift+Enter or Alt+Enter → newline.
+              if (e.key === "Enter" && !e.shiftKey && !e.altKey) {
+                e.preventDefault();
+                handleSendMessage();
+                requestAnimationFrame(() => {
+                  const ta = document.getElementById("chatInput");
+                  if (ta) ta.style.height = "auto";
+                });
+              }
+            }}
             disabled={isSending}
           />
 
@@ -751,6 +874,14 @@ const Chat = () => {
           </button>
         </div>
       </div>
+
+      {lightbox && (
+        <Lightbox
+          urls={lightbox.urls}
+          startIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
+        />
+      )}
     </div>
   );
 };

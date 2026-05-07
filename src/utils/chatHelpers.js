@@ -79,7 +79,58 @@ export const getMessagePreview = (value) => {
   return value.length > 80 ? `${value.slice(0, 80)}...` : value;
 };
 
-// ---------- Mention helpers (feature #4) ----------
+// Group an ordered list of messages into a list of "render groups" so that
+// consecutive image-only messages from the same sender become a single grid
+// instead of a stack of one-image bubbles. Non-image messages and any
+// boundary (different sender, gap of >2 minutes, system message) end the
+// current group.
+//
+// Each output entry is either:
+//   { kind: "single", message }  — render normally
+//   { kind: "image-group", sender, messages: [...] }  — render as a grid
+export const groupConsecutiveImages = (messages = []) => {
+  if (!Array.isArray(messages) || messages.length === 0) return [];
+  const out = [];
+  let currentGroup = null;
+
+  const isPureImageMessage = (m) =>
+    !!m &&
+    !m.isDeleted &&
+    !m.isSystem &&
+    typeof m.message === "string" &&
+    isImage(m.message);
+
+  for (const msg of messages) {
+    if (isPureImageMessage(msg)) {
+      const sameSender =
+        currentGroup &&
+        String(currentGroup.sender) === String(msg.sender);
+      const recentEnough =
+        currentGroup &&
+        currentGroup.messages.length > 0 &&
+        Math.abs(
+          new Date(msg.createdAt).getTime() -
+            new Date(
+              currentGroup.messages[currentGroup.messages.length - 1].createdAt
+            ).getTime()
+        ) < 2 * 60 * 1000;
+      if (currentGroup && sameSender && recentEnough) {
+        currentGroup.messages.push(msg);
+        continue;
+      }
+      currentGroup = {
+        kind: "image-group",
+        sender: msg.sender,
+        messages: [msg],
+      };
+      out.push(currentGroup);
+    } else {
+      currentGroup = null;
+      out.push({ kind: "single", message: msg });
+    }
+  }
+  return out;
+};
 //
 // We store mentions as a list of user ids and render them inline by replacing
 // "@Name " with a styled chip. This keeps the message text human-readable on
@@ -129,32 +180,100 @@ export const insertMention = (text, trigger, name) => {
   };
 };
 
-// Tokenise message text into a list of plain text and mention segments so the
-// renderer can apply highlight styling. Mentions are detected by name match
-// against the supplied id->name map.
+// URL detector. Catches http(s) and bare www.* URLs but stays conservative —
+// won't grab trailing punctuation like commas/periods that aren't part of the
+// URL. Trailing parens are excluded only when they don't have a matching
+// opening paren in the URL itself.
+const URL_REGEX = /\b((?:https?:\/\/|www\.)[^\s<>"]+)/gi;
+
+// Trim noisy punctuation off the end of a captured URL while keeping balanced
+// brackets/parens (Wikipedia-style URLs).
+const trimUrlTrailingPunct = (match) => {
+  let url = match;
+  // Strip trailing punctuation that's almost never part of an actual URL.
+  let stripped = true;
+  while (stripped && url.length > 0) {
+    stripped = false;
+    const last = url[url.length - 1];
+    if (",.;:!?".includes(last)) {
+      url = url.slice(0, -1);
+      stripped = true;
+    } else if (last === ")" && (url.match(/\(/g) || []).length < (url.match(/\)/g) || []).length) {
+      url = url.slice(0, -1);
+      stripped = true;
+    } else if (last === "]" && (url.match(/\[/g) || []).length < (url.match(/\]/g) || []).length) {
+      url = url.slice(0, -1);
+      stripped = true;
+    }
+  }
+  return url;
+};
+
+// Tokenise message text into a list of plain text, mention, and url segments
+// so the renderer can apply highlight styling and make urls clickable.
+// Mentions are detected by name match against the supplied id->name map.
 export const tokenizeMessage = (text, mentionIdToName = {}) => {
   if (!text) return [];
+
   // Build a regex that matches "@" followed by any of the known names. We
   // sort by length so longer names match before shorter substrings.
   const names = Object.values(mentionIdToName)
     .filter(Boolean)
     .sort((a, b) => b.length - a.length);
-  if (names.length === 0) return [{ type: "text", value: text }];
-  // Escape for regex
-  const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const pattern = new RegExp(`@(${escaped.join("|")})`, "g");
-  const tokens = [];
-  let lastIndex = 0;
-  let match;
-  while ((match = pattern.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      tokens.push({ type: "text", value: text.slice(lastIndex, match.index) });
-    }
-    tokens.push({ type: "mention", value: match[1] });
-    lastIndex = pattern.lastIndex;
+  const escapedNames = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const mentionPattern = names.length
+    ? new RegExp(`@(${escapedNames.join("|")})`, "g")
+    : null;
+
+  // First pass: collect non-overlapping URL matches (with trimmed trailing
+  // punctuation). We do URLs first because their boundaries are unambiguous.
+  const ranges = [];
+  let urlMatch;
+  URL_REGEX.lastIndex = 0;
+  while ((urlMatch = URL_REGEX.exec(text)) !== null) {
+    const raw = urlMatch[0];
+    const trimmed = trimUrlTrailingPunct(raw);
+    if (!trimmed) continue;
+    const start = urlMatch.index;
+    const end = start + trimmed.length;
+    const href = trimmed.startsWith("http") ? trimmed : `https://${trimmed}`;
+    ranges.push({ start, end, type: "url", value: trimmed, href });
   }
-  if (lastIndex < text.length) {
-    tokens.push({ type: "text", value: text.slice(lastIndex) });
+
+  // Second pass: collect mention matches that don't overlap any URL we already
+  // found. This protects names that happen to appear inside a query string.
+  if (mentionPattern) {
+    let m;
+    mentionPattern.lastIndex = 0;
+    while ((m = mentionPattern.exec(text)) !== null) {
+      const start = m.index;
+      const end = start + m[0].length;
+      const overlaps = ranges.some(
+        (r) => !(end <= r.start || start >= r.end)
+      );
+      if (overlaps) continue;
+      ranges.push({ start, end, type: "mention", value: m[1] });
+    }
+  }
+
+  ranges.sort((a, b) => a.start - b.start);
+
+  // Stitch the tokens together with the surrounding plain text.
+  const tokens = [];
+  let cursor = 0;
+  for (const r of ranges) {
+    if (r.start > cursor) {
+      tokens.push({ type: "text", value: text.slice(cursor, r.start) });
+    }
+    if (r.type === "url") {
+      tokens.push({ type: "url", value: r.value, href: r.href });
+    } else {
+      tokens.push({ type: "mention", value: r.value });
+    }
+    cursor = r.end;
+  }
+  if (cursor < text.length) {
+    tokens.push({ type: "text", value: text.slice(cursor) });
   }
   return tokens;
 };
