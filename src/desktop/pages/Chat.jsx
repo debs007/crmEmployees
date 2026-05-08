@@ -480,24 +480,33 @@ const Chat = () => {
   }
 
   return (
-    <div className="p-0 lg:p-4 w-full flex flex-col h-[100dvh] md:h-[calc(100vh-110px)] lg:h-[calc(100vh-80px)]">
-      <div className="flex gap-2 lg:gap-4 mb-2 lg:mb-6 border-b pt-1.5 px-2 lg:px-8 pb-1.5 items-center">
-        <Avatar
-          name={user?.name || ""}
-          src={user?.avatar || ""}
-          size={40}
-        />
-        <div className="min-w-0">
-          <h2 className="text-[13px] lg:text-sm font-semibold truncate">
-            {user?.name}
-          </h2>
-          <p className="text-[9px] lg:text-[10px] text-green-500 font-semibold">
-            {isOnline ? "Online" : "Offline"}
-          </p>
+    <div className="w-full flex flex-col h-[100dvh] md:h-[calc(100vh-110px)] lg:h-[calc(100vh-80px)] bg-white">
+      <div className="slack-topbar px-3 lg:px-6 py-2.5">
+        <div className="flex items-center gap-3 min-w-0">
+          <Avatar
+            name={user?.name || ""}
+            src={user?.avatar || ""}
+            size={36}
+            rounded="rounded-md"
+          />
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-bold text-ink truncate">
+              <span className="text-ink-muted mr-0.5">@</span>
+              {user?.name}
+            </h2>
+            <p className="text-chat-meta text-ink-muted flex items-center gap-1">
+              <span
+                className={`inline-block w-1.5 h-1.5 rounded-full ${
+                  isOnline ? "bg-confirm-500" : "bg-ink-faint"
+                }`}
+              />
+              {isOnline ? "Active now" : "Away"}
+            </p>
+          </div>
         </div>
       </div>
 
-      <div className="flex-1 px-2 lg:px-4 overflow-y-auto scrollable pb-2">
+      <div className="flex-1 px-2 lg:px-4 overflow-y-auto slack-scroll pb-2">
         {messages.map((msg, index) => {
           const isSelf = String(msg.sender) === String(senderId);
           const senderLabel = isSelf ? "You" : user?.name || "Unknown";
@@ -521,46 +530,47 @@ const Chat = () => {
                   </span>
                 </div>
               )}
-              <div
-                className={`flex items-start gap-2 mb-2 ${
-                  isSelf ? "justify-end" : "justify-start"
-                }`}
-              >
-                {!isSelf && (
-                  <Avatar
-                    name={user?.name || ""}
-                    src={user?.avatar || ""}
-                    size={28}
-                  />
-                )}
+              <div className="flex items-start gap-2 mb-0.5 px-2">
+                <Avatar
+                  name={isSelf ? (userData?.name || "Me") : (user?.name || "")}
+                  src={isSelf ? (userData?.avatar || "") : (user?.avatar || "")}
+                  size={36}
+                  rounded="rounded-md"
+                />
                 <div
                   ref={(el) => {
                     if (msg?._id && el) messageRefs.current[msg._id] = el;
                   }}
-                  className={`group p-2 rounded-lg flex flex-col gap-1 max-w-[75%] min-w-[140px] shadow-sm relative
+                  className={`group relative flex flex-col gap-1 px-2 py-1 rounded-md w-full max-w-full
                     ${
                       msg.isDeleted
-                        ? "bg-gray-100 text-gray-500 border border-gray-200"
-                        : isSelf
-                        ? "bg-[#FFFBDC] text-slate-900 border border-[#f2dba0] ml-auto"
-                        : "bg-slate-100 text-slate-900 border border-slate-200"
+                        ? "text-ink-faint italic"
+                        : "text-ink"
                     }
-                    ${highlightedId === msg._id ? "ring-2 ring-orange-200" : ""}
+                    ${highlightedId === msg._id ? "bg-yellow-50" : "hover:bg-surface-muted"}
                   `}
                 >
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-baseline gap-2">
                     <span
-                      className="text-[10px] font-semibold opacity-80 truncate max-w-[180px]"
+                      className="text-[14px] font-bold text-ink truncate max-w-[200px]"
                       title={senderLabel}
                     >
                       {senderLabel}
                     </span>
-                    <div className="flex items-center gap-1">
+                    <span className="text-chat-meta text-ink-faint">
+                      {moment(msg.createdAt).calendar(null, {
+                        sameDay: "[Today at] h:mm A",
+                        lastDay: "[Yesterday at] h:mm A",
+                        lastWeek: "ddd [at] h:mm A",
+                        sameElse: "MMM D [at] h:mm A",
+                      })}
+                    </span>
+                    <div className="ml-auto flex items-center gap-1">
                       {!msg.isDeleted && (
                         <button
                           type="button"
                           onClick={() => handleReplySelect(msg)}
-                          className="text-slate-400 hover:text-slate-700 opacity-0 group-hover:opacity-100"
+                          className="text-ink-faint hover:text-ink opacity-0 group-hover:opacity-100"
                           title="Reply"
                         >
                           <CornerUpLeft className="w-3 h-3" />
@@ -668,19 +678,9 @@ const Chat = () => {
                     !msg.message
                   ) && renderMessageBody(msg, isSelf)}
 
-                  <div className="flex items-center gap-1 self-end mt-0.5">
-                    {msg.editedAt && !msg.isDeleted && (
-                      <span className="text-[9px] text-gray-500 italic">
-                        edited
-                      </span>
-                    )}
-                    <span
-                      className="text-[9px] text-gray-500"
-                      title={moment(msg.createdAt).format("DD MMM YYYY, HH:mm")}
-                    >
-                      {moment(msg.createdAt).format("HH:mm")}
-                    </span>
-                  </div>
+                  {msg.editedAt && !msg.isDeleted && (
+                    <span className="text-chat-meta text-ink-faint italic">(edited)</span>
+                  )}
                 </div>
               </div>
             </div>
