@@ -226,6 +226,7 @@ const ChannelTaskManager = ({
     taskId: "",
     tab: "comments",
   });
+  const [activeTab, setActiveTab] = useState("pending");
   const lastOpenTaskSignalRef = useRef(0);
 
   const memberOptions = useMemo(
@@ -314,6 +315,7 @@ const ChannelTaskManager = ({
       taskId: "",
       tab: "comments",
     });
+    setActiveTab("pending");
     setNewTask({
       title: "",
       description: "",
@@ -385,7 +387,7 @@ const ChannelTaskManager = ({
       if (search) params.append("search", search);
       if (filters.status) params.append("status", filters.status);
       if (filters.month) params.append("month", filters.month);
-      if (filters.assignedTo) params.append("assignedTo", filters.assignedTo);
+      if (currentUserId) params.append("assignedTo", currentUserId);
       if (filters.priority) params.append("priority", filters.priority);
       if (filters.tag) params.append("tag", filters.tag);
 
@@ -420,10 +422,10 @@ const ChannelTaskManager = ({
   }, [
     showList,
     channelId,
+    currentUserId,
     search,
     filters.status,
     filters.month,
-    filters.assignedTo,
     filters.priority,
     filters.tag,
   ]);
@@ -439,10 +441,10 @@ const ChannelTaskManager = ({
   }, [
     showList,
     channelId,
+    currentUserId,
     search,
     filters.status,
     filters.month,
-    filters.assignedTo,
     filters.priority,
     filters.tag,
   ]);
@@ -840,8 +842,11 @@ const ChannelTaskManager = ({
   };
 
   const groupedTasks = useMemo(() => {
+    const filteredByTab = activeTab === "pending"
+      ? tasks.filter((t) => t.status !== "Completed")
+      : tasks.filter((t) => t.status === "Completed");
     const groups = {};
-    tasks.forEach((task) => {
+    filteredByTab.forEach((task) => {
       const key = moment(task.deadline).isValid()
         ? moment(task.deadline).format("YYYY-MM")
         : "no-deadline";
@@ -858,6 +863,9 @@ const ChannelTaskManager = ({
       return b.localeCompare(a);
     });
   }, [groupedTasks]);
+
+  const pendingCount = useMemo(() => tasks.filter((t) => t.status !== "Completed").length, [tasks]);
+  const completedCount = useMemo(() => tasks.filter((t) => t.status === "Completed").length, [tasks]);
 
   const toggleMonth = (key) => {
     setCollapsedMonths((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -1506,6 +1514,44 @@ const ChannelTaskManager = ({
 
       {showList && (
         <div className="flex-1 overflow-y-auto px-3 lg:px-4 pb-4">
+
+          {/* Pending / Completed Tabs */}
+          <div className="mb-3 flex gap-0 rounded-lg border border-gray-200 bg-white overflow-hidden">
+            <button
+              type="button"
+              onClick={() => { setActiveTab("pending"); setCollapsedMonths({}); }}
+              className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${
+                activeTab === "pending"
+                  ? "bg-orange-500 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              Pending
+              <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-bold ${
+                activeTab === "pending" ? "bg-white/25 text-white" : "bg-orange-100 text-orange-700"
+              }`}>
+                {pendingCount}
+              </span>
+            </button>
+            <div className="w-px bg-gray-200" />
+            <button
+              type="button"
+              onClick={() => { setActiveTab("completed"); setCollapsedMonths({}); }}
+              className={`flex-1 py-2.5 text-sm font-semibold transition-colors ${
+                activeTab === "completed"
+                  ? "bg-emerald-600 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              Completed
+              <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-bold ${
+                activeTab === "completed" ? "bg-white/25 text-white" : "bg-emerald-100 text-emerald-700"
+              }`}>
+                {completedCount}
+              </span>
+            </button>
+          </div>
+
           <div className="rounded-lg border border-gray-200 bg-white p-3 mb-3">
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-12">
               <input
@@ -1537,20 +1583,6 @@ const ChannelTaskManager = ({
                 }
                 className="border border-gray-300 rounded px-3 py-2 text-sm outline-none xl:col-span-2"
               />
-              <select
-                value={filters.assignedTo}
-                onChange={(event) =>
-                  setFilters((prev) => ({ ...prev, assignedTo: event.target.value }))
-                }
-                className="border border-gray-300 rounded px-3 py-2 text-sm outline-none xl:col-span-2"
-              >
-                <option value="">All Assignees</option>
-                {memberOptions.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.name}
-                  </option>
-                ))}
-              </select>
               <select
                 value={filters.priority}
                 onChange={(event) =>
@@ -1584,7 +1616,7 @@ const ChannelTaskManager = ({
             </div>
             <div className="mt-2 flex items-center justify-between gap-2 border-t border-gray-100 pt-2">
               <p className="text-xs text-slate-500">
-                {tasks.length} task{tasks.length === 1 ? "" : "s"} in this channel
+                {activeTab === "pending" ? pendingCount : completedCount} {activeTab} task{(activeTab === "pending" ? pendingCount : completedCount) === 1 ? "" : "s"} assigned to you
               </p>
               <div className="inline-flex rounded border border-gray-300 bg-white p-0.5">
                 <button
@@ -1627,7 +1659,13 @@ const ChannelTaskManager = ({
 
           {!loading && tasks.length === 0 && (
             <div className="rounded-lg border border-gray-200 bg-white px-4 py-6 text-sm text-gray-500">
-              No tasks found for this channel.
+              No tasks assigned to you in this channel.
+            </div>
+          )}
+
+          {!loading && tasks.length > 0 && sortedGroupKeys.length === 0 && (
+            <div className="rounded-lg border border-gray-200 bg-white px-4 py-6 text-sm text-gray-500">
+              No {activeTab} tasks assigned to you.
             </div>
           )}
 

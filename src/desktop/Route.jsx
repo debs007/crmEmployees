@@ -27,6 +27,7 @@ import CallbackView from "./pages/CallBackView";
 import SalesView from "./pages/SalesView";
 import TransferView from "./pages/TransferView";
 import MyPayslips from "./pages/MyPayslips";
+import MyTasks from "./pages/MyTasks";
 import { useSocketSetup } from "../hooks/useSocketSetup";
 import { useGlobalNotification } from "../hooks/useGlobalNotifications";
 
@@ -79,6 +80,7 @@ function DesktopRouting() {
                     <Route path="/salesview" element={<SalesView/>}/>
                     <Route path="/transferview" element={<TransferView/>}/>
                     <Route path="/payslips" element={<MyPayslips/>}/>
+                    <Route path="/my-tasks" element={<MyTasks />}/>
 
                   </Routes>
                 </div>

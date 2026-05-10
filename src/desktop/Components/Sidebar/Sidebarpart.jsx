@@ -9,6 +9,7 @@ import arrow from "../../../assets/desktop/arrow.svg";
 import edit from "../../../assets/desktop/edit.svg";
 import logo from "../../../assets/desktop/logo.svg";
 import { FiChevronLeft, FiChevronRight } from "react-icons/fi";
+import { MdOutlineTaskAlt } from "react-icons/md";
 import { useAuth } from "../../../context/authContext";
 import { useEffect, useState } from "react";
 import socket from "../../../utils/socket";
@@ -189,6 +190,10 @@ function Sidebarpart() {
               ₹
             </span>
             <p className="text-[11px] font-semibold mt-0.5">Payslips</p>
+          </Link>
+          <Link to="/my-tasks" className="flex flex-col items-center py-2 rounded-md hover:bg-sidebar-hover text-sidebar-muted hover:text-white">
+            <MdOutlineTaskAlt size={22} />
+            <p className="text-[11px] font-semibold mt-0.5">My Tasks</p>
           </Link>
           <div className="mt-2 flex flex-col items-center">
             <button
