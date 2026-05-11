@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import moment from "moment";
-import { downloadFile } from "../../utils/helper";
 
 const monthLabels = [
   "January",
@@ -27,6 +26,24 @@ export default function MyPayslips() {
   const [error, setError] = useState("");
   const apiBase = import.meta.env.VITE_BACKEND_API;
   const token = () => localStorage.getItem("token");
+
+  const downloadPayslip = async (id, fileName) => {
+    try {
+      const res = await fetch(`${apiBase}/payslips/download/${id}`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      if (!res.ok) { alert("Download failed."); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName || "payslip.pdf";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Download failed.");
+    }
+  };
 
   const fetchPayslips = async () => {
     setLoading(true);
@@ -86,7 +103,7 @@ export default function MyPayslips() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => downloadFile(p.fileUrl, p.fileName)}
+                  onClick={() => downloadPayslip(p._id, p.fileName)}
                   className="px-3 py-1.5 rounded bg-orange-500 text-white"
                 >
                   Download
