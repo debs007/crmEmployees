@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { IoPeopleSharp } from "react-icons/io5";
 import { Send, Paperclip, CornerUpLeft, X, Pencil, Trash2 } from "lucide-react";
+import { BsPin, BsPinFill } from "react-icons/bs";
 import moment from "moment";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { BsEmojiSmile } from "react-icons/bs";
@@ -72,6 +73,8 @@ const ChannelChat = () => {
   const [uploading, setUploading] = useState(false);
   const [loading, setloading] = useState(false);
   const [replyTarget, setReplyTarget] = useState(null);
+  const [pinnedMessages, setPinnedMessages] = useState([]);
+  const [showPinned, setShowPinned] = useState(false);
   const [highlightedId, setHighlightedId] = useState(null);
   const [activeTab, setActiveTab] = useState(
     location?.state?.openTasks ? "tasks" : "chat"
@@ -91,7 +94,7 @@ const ChannelChat = () => {
   const [openMessageMenu, setOpenMessageMenu] = useState(null); // msg id
   const [reports, setReports] = useState([]);
   const [reportsLoading, setReportsLoading] = useState(false);
-              
+
   const token = localStorage.getItem("token");
     const messageListRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -145,6 +148,40 @@ const ChannelChat = () => {
       setChannelsInfo(data);
     } catch (error) {
       console.error("Error fetching channel:", error);
+    }
+  };
+
+  const fetchPinned = async () => {
+    if (!channelId) return;
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch(
+        `${import.meta.env.VITE_BACKEND_API}/channels/${channelId}/pinned`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const data = await res.json();
+      if (data?.success) setPinnedMessages(data.pinned || []);
+    } catch (_) {}
+  };
+
+  const handleTogglePin = async (msg) => {
+    try {
+      const token = localStorage.getItem("token");
+      await axios.patch(
+        `${import.meta.env.VITE_BACKEND_API}/channels/messages/${msg._id}/pin`,
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      // Optimistically refresh pinned list
+      await fetchPinned();
+      // Reflect on the message in the local list
+      setMessages((prev) =>
+        prev.map((m) =>
+          m._id === msg._id ? { ...m, isPinned: !m.isPinned } : m
+        )
+      );
+    } catch (err) {
+      console.error("Pin failed:", err);
     }
   };
 
@@ -251,10 +288,32 @@ const ChannelChat = () => {
     };
     socket.on("channel-report-updated", onReportUpdate);
 
+    // Pin/unpin broadcasts so all clients update in real-time (fix #5).
+    const onPinUpdate = ({ messageId, isPinned }) => {
+      setMessages((prev) =>
+        prev.map((m) => (m._id?.toString() === messageId?.toString() ? { ...m, isPinned } : m))
+      );
+      // Refresh the pinned banner.
+      fetchPinned();
+    };
+    socket.on("channel-message-pinned", onPinUpdate);
+
+    // Delete system message when report is deleted (fix #6b).
+    const onMsgDeleted = ({ messageId }) => {
+      if (!messageId) return;
+      setMessages((prev) => prev.filter((m) => m._id?.toString() !== messageId?.toString()));
+    };
+    socket.on("channel-message-deleted", onMsgDeleted);
+
+    // Fetch pinned messages for this channel.
+    fetchPinned();
+
     return () => {
       if (typeof unsubscribe === "function") unsubscribe();
       socket.off("channel-message-updated", onMsgUpdate);
       socket.off("channel-report-updated", onReportUpdate);
+      socket.off("channel-message-pinned", onPinUpdate);
+      socket.off("channel-message-deleted", onMsgDeleted);
     };
   }, [channelId]);
 
@@ -561,6 +620,29 @@ const ChannelChat = () => {
 
 
 
+  // ----- Channel delete (kept) -----
+  const handleChannelDelete = async () => {
+    if (!channelId) return;
+    const ok = window.confirm("Delete this channel? This action cannot be undone.");
+    if (!ok) return;
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_BACKEND_API}/api/${channelId}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data?.error || "Could not delete channel");
+        return;
+      }
+      navigate("/channels");
+    } catch (err) {
+      alert("Could not delete channel");
+    }
+  };
 
   // ----- Send invite (kept) -----
   const handleSend = async () => {
@@ -794,6 +876,7 @@ const ChannelChat = () => {
   }
 
   return (
+    <>
     <div className="w-full flex flex-col h-[100dvh] md:h-[calc(100vh-110px)] lg:h-[calc(100vh-80px)] bg-white">
       {/* Slack-style channel header */}
       <div className="slack-topbar px-3 lg:px-6 py-2.5">
@@ -880,20 +963,18 @@ const ChannelChat = () => {
             </div>
           </div>
 
-          {/* Popovers / modals (kept). */}
-          <div className="hidden">
-            <div className="relative flex items-center gap-1 sm:gap-2 shrink-0">
-              {modal && (
-                <div className="absolute top-10 right-0 mt-2 space-y-3 bg-white px-3 pb-4 pt-3 rounded shadow-lg w-72 max-w-[85vw] z-30">
-                  <button
-                    className="absolute top-1 right-1 text-xl px-2"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setModal(false);
-                    }}
-                  >
-                    &times;
-                  </button>
+        </div>
+
+      {/* Share / invite popover — rendered outside the topbar flow so it's never hidden */}
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-start justify-end pt-16 pr-4 pointer-events-none">
+          <div className="pointer-events-auto relative space-y-3 bg-white px-3 pb-4 pt-3 rounded-lg shadow-lg w-72 max-w-[90vw] border border-surface-divider">
+            <button
+              className="absolute top-1 right-1 text-xl px-2 text-ink-muted hover:text-ink"
+              onClick={(e) => { e.stopPropagation(); setModal(false); }}
+            >
+              &times;
+            </button>
                   <p className="text-[11px] font-semibold text-gray-600">Invite by email</p>
                   <input
                     name="email"
@@ -922,19 +1003,15 @@ const ChannelChat = () => {
                     onClick={handleSend}
                   >
                     Send single invite
-                  </button>
-                </div>
-              )}
-                          </div>
+                  </button>                </div>
           </div>
-        </div>
+      )}
 
-      {/* ===== Reports tab (feature #6) — download only ===== */}
+      
+      {/* ===== Reports tab - download only ===== */}
       {activeTab === "reports" && (
         <div className="flex-1 overflow-y-auto px-3 lg:px-6 pb-4">
-          <h3 className="text-sm font-semibold text-ink mb-3">
-            Monthly Task Reports
-          </h3>
+          <h3 className="text-sm font-semibold text-ink mb-3">Monthly Task Reports</h3>
           {reportsLoading ? (
             <p className="text-xs text-ink-muted">Loading…</p>
           ) : reports.length === 0 ? (
@@ -944,29 +1021,13 @@ const ChannelChat = () => {
               {reports.map((r) => {
                 const monthLabel = monthLabels[r.month - 1] || r.month;
                 return (
-                  <li
-                    key={r._id}
-                    className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs bg-white"
-                  >
+                  <li key={r._id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs bg-white">
                     <div className="min-w-0">
-                      <p className="font-medium text-ink">
-                        {r.title || `${monthLabel} ${r.year} report`}
-                      </p>
-                      <p className="text-[11px] text-ink-muted truncate">
-                        {r.fileName}
-                        {r.note ? ` • ${r.note}` : ""}
-                      </p>
-                      <p className="text-[10px] text-ink-faint">
-                        Uploaded {moment(r.createdAt).format("DD MMM YYYY, HH:mm")}
-                      </p>
+                      <p className="font-medium text-ink">{r.title || `${monthLabel} ${r.year} report`}</p>
+                      <p className="text-[11px] text-ink-muted truncate">{r.fileName}{r.note ? ` • ${r.note}` : ""}</p>
+                      <p className="text-[10px] text-ink-faint">{moment(r.createdAt).format("DD MMM YYYY, HH:mm")}</p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => downloadFile(r.fileUrl, r.fileName)}
-                      className="slack-btn-confirm !py-1 !text-xs"
-                    >
-                      Download
-                    </button>
+                    <button type="button" onClick={() => downloadFile(r.fileUrl, r.fileName)} className="slack-btn-confirm !py-1 !text-xs">Download</button>
                   </li>
                 );
               })}
@@ -1028,6 +1089,7 @@ const ChannelChat = () => {
                 </dd>
               </div>
             </dl>
+            <div className="mt-4">            </div>
           </div>
         </div>
       )}
@@ -1035,6 +1097,46 @@ const ChannelChat = () => {
       {/* ===== Chat tab ===== */}
       {activeTab === "chat" && (
         <>
+          {/* Pinned messages banner — WhatsApp style (fix #5) */}
+          {pinnedMessages.length > 0 && (
+            <div className="px-3 lg:px-6 border-b border-surface-divider bg-surface-subtle">
+              <button
+                type="button"
+                onClick={() => setShowPinned((v) => !v)}
+                className="flex items-center justify-between w-full py-1.5 text-[12px] text-ink-muted hover:text-ink"
+              >
+                <span className="flex items-center gap-1.5 font-semibold">
+                  <BsPinFill size={11} className="text-brand-yellow" />
+                  {pinnedMessages.length} pinned message{pinnedMessages.length !== 1 ? "s" : ""}
+                </span>
+                <span>{showPinned ? "▲ Hide" : "▼ Show"}</span>
+              </button>
+              {showPinned && (
+                <ul className="pb-2 space-y-1">
+                  {pinnedMessages.map((pm) => (
+                    <li
+                      key={pm._id}
+                      className="flex items-start gap-2 rounded-md bg-white border border-surface-divider px-2.5 py-1.5 text-[12px]"
+                    >
+                      <BsPinFill size={11} className="text-brand-yellow mt-0.5 shrink-0" />
+                      <span className="flex-1 min-w-0 text-ink line-clamp-2">
+                        {pm.message || "[attachment]"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleTogglePin(pm)}
+                        className="shrink-0 text-ink-faint hover:text-red-500 text-xs"
+                        title="Unpin"
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           <div
             ref={messageListRef}
             className="flex-1 px-2 lg:px-4 overflow-y-auto scrollable pb-2"
@@ -1125,6 +1227,16 @@ const ChannelChat = () => {
                               title="Reply"
                             >
                               <CornerUpLeft className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {!msg.isDeleted && (
+                            <button
+                              type="button"
+                              onClick={() => handleTogglePin(msg)}
+                              className={`opacity-0 group-hover:opacity-100 ${msg.isPinned ? "text-brand-yellow opacity-100" : "text-ink-faint hover:text-ink"}`}
+                              title={msg.isPinned ? "Unpin" : "Pin message"}
+                            >
+                              {msg.isPinned ? <BsPinFill size={13} /> : <BsPin size={13} />}
                             </button>
                           )}
                           {canMutate && (
@@ -1567,6 +1679,7 @@ const ChannelChat = () => {
         />
       )}
     </div>
+    </>
   );
 };
 

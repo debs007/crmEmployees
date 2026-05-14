@@ -32,7 +32,7 @@ export default function FilePreview({ url, compact = false }) {
 
   // The compact "type indicator" row used for non-previewable files.
   const typeRow = (
-    <div className="flex items-center gap-2 bg-white/90 text-gray-800 p-2 rounded-lg max-w-full">
+    <div className="inline-flex items-center gap-2 bg-white/90 text-gray-800 p-2 rounded-lg max-w-fit">
       <span
         className={`text-[10px] font-semibold px-2 py-0.5 rounded ${getFileTypeColor(
           url
@@ -110,7 +110,7 @@ export default function FilePreview({ url, compact = false }) {
 
   return (
     <>
-      <div className="flex flex-col gap-1.5 max-w-full">
+      <div className="inline-flex flex-col gap-1.5 max-w-xs">
         {inline}
         {typeRow}
       </div>

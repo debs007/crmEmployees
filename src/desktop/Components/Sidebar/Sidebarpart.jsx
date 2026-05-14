@@ -36,6 +36,8 @@ function Sidebarpart() {
   const [unreadMessages, setUnreadMessages] = useState({});
   const { getAllUsers, userData } = useAuth();
   const [openChatId, setOpenChatId] = useState(null);
+  const [sidebarSearch, setSidebarSearch] = useState("");
+  const [pendingTasks, setPendingTasks] = useState(0);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_PREF_KEY) === "1";
@@ -90,9 +92,34 @@ function Sidebarpart() {
       fetchUsers();
       channel();
     });
+
+    const fetchPendingTasks = async () => {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+      try {
+        const response = await fetch(
+          `${import.meta.env.VITE_BACKEND_API}/channels/tasks/count`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (response.ok) {
+          const data = await response.json();
+          setPendingTasks(data?.pendingCount || 0);
+        }
+      } catch (error) {
+        // silent
+      }
+    };
+    fetchPendingTasks();
+    const taskInterval = setInterval(fetchPendingTasks, 60_000);
+    const onFocus = () => fetchPendingTasks();
+    window.addEventListener("focus", onFocus);
+    socket.on("soft-refresh", fetchPendingTasks);
    
     return () => {
-      socket.off("updateUnread"); 
+      socket.off("updateUnread");
+      socket.off("soft-refresh", fetchPendingTasks);
+      clearInterval(taskInterval);
+      window.removeEventListener("focus", onFocus);
       socket.disconnect();
     };
    
@@ -191,9 +218,14 @@ function Sidebarpart() {
             </span>
             <p className="text-[11px] font-semibold mt-0.5">Payslips</p>
           </Link>
-          <Link to="/my-tasks" className="flex flex-col items-center py-2 rounded-md hover:bg-sidebar-hover text-sidebar-muted hover:text-white">
+          <Link to="/my-tasks" className="flex flex-col items-center py-2 rounded-md hover:bg-sidebar-hover text-sidebar-muted hover:text-white relative">
             <MdOutlineTaskAlt size={22} />
             <p className="text-[11px] font-semibold mt-0.5">My Tasks</p>
+            {pendingTasks > 0 && (
+              <span className="absolute top-1 right-1 slack-unread">
+                {pendingTasks > 99 ? "99+" : pendingTasks}
+              </span>
+            )}
           </Link>
           <div className="mt-2 flex flex-col items-center">
             <button
@@ -262,6 +294,16 @@ function Sidebarpart() {
             <img src={edit} alt="" className="w-[12px] h-[12px] invert opacity-70" />
           </button>
         </div>
+        {/* Search input */}
+        <div className="px-3 mb-1">
+          <input
+            type="text"
+            placeholder="Search channels or people..."
+            value={sidebarSearch}
+            onChange={(e) => setSidebarSearch(e.target.value)}
+            className="w-full text-[13px] px-2.5 py-1.5 rounded-md bg-sidebar-hover text-white placeholder-sidebar-muted border border-sidebar-divider focus:outline-none focus:border-sidebar-active"
+          />
+        </div>
 
         <div className="flex flex-col flex-1 min-h-0 px-1">
           {/* Channels Section */}
@@ -273,7 +315,7 @@ function Sidebarpart() {
               )}
             </div>
             <ul className="flex-1 min-h-0 overflow-y-auto slack-scroll slack-scroll-dark">
-              {channels?.map((channel) => {
+              {channels?.filter(ch => !sidebarSearch || ch.name?.toLowerCase().includes(sidebarSearch.toLowerCase())).map((channel) => {
                 const isActive = location.pathname === `/channelchat/${channel._id}`;
                 return (
                 <li key={channel._id}>
@@ -289,7 +331,7 @@ function Sidebarpart() {
                       rounded="rounded-sm"
                       fontSize="10px"
                     />
-                    <span className="truncate flex-1 min-w-0 slack-row-meta">
+                    <span className="truncate flex-1 min-w-0 font-medium text-white">
                       <span className="text-sidebar-muted mr-0.5">#</span>
                       {channel.name}
                     </span>
@@ -309,7 +351,7 @@ function Sidebarpart() {
               <span>Direct messages</span>
             </div>
             <ul className="flex-1 min-h-0 overflow-y-auto slack-scroll slack-scroll-dark">
-              {employees?.filter(user => user.lastMessageTime).map((user, i) => {
+              {employees?.filter(user => user.lastMessageTime && (!sidebarSearch || user.name?.toLowerCase().includes(sidebarSearch.toLowerCase()))).map((user, i) => {
                 const isActive = location.pathname === `/chat/${user.id}`;
                 return (
                 <li key={user.id || i}>
