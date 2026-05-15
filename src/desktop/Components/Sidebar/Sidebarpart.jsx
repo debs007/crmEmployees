@@ -9,7 +9,7 @@ import arrow from "../../../assets/desktop/arrow.svg";
 import edit from "../../../assets/desktop/edit.svg";
 import logo from "../../../assets/desktop/logo.svg";
 import { FiChevronLeft, FiChevronRight } from "react-icons/fi";
-import { MdOutlineTaskAlt } from "react-icons/md";
+import { MdOutlineTaskAlt, MdOutlineTableChart } from "react-icons/md";
 import { useAuth } from "../../../context/authContext";
 import { useEffect, useState } from "react";
 import socket from "../../../utils/socket";
@@ -226,6 +226,10 @@ function Sidebarpart() {
                 {pendingTasks > 99 ? "99+" : pendingTasks}
               </span>
             )}
+          </Link>
+          <Link to="/salary-sheet" className="flex flex-col items-center py-2 rounded-md hover:bg-sidebar-hover text-sidebar-muted hover:text-white">
+            <MdOutlineTableChart size={22} />
+            <p className="text-[11px] font-semibold mt-0.5">Salary</p>
           </Link>
           <div className="mt-2 flex flex-col items-center">
             <button

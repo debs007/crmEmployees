@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import search from "../../../assets/desktop/search.svg";
 import notificationIcon from "../../../assets/desktop/bell.png";
 import { IoIosClose } from "react-icons/io";
 import logo from "../../../assets/desktop/logo.svg";
@@ -122,17 +121,7 @@ function Searchbar() {
   }, []);
 
   return (
-    <div className="app-toolbar relative flex w-full items-center justify-between gap-4 px-5 pb-5 pt-5 lg:gap-6 lg:px-6">
-      <div className="app-search-shell flex max-w-3xl flex-1 items-center gap-3 rounded-2xl px-4 py-3">
-        <img src={search} alt="Search Icon" className="h-4 w-4 opacity-60" />
-        <input
-          type="text"
-          placeholder="Search"
-          className="w-full bg-transparent text-sm text-slate-700 placeholder:text-slate-400"
-        />
-      </div>
-
-      <div className="flex items-center gap-3">
+    <div className="app-toolbar relative flex w-full items-center justify-end gap-3 px-5 py-3 lg:px-6 border-b border-slate-100">
         <button
           type="button"
           className="app-icon-button relative h-10 w-10 rounded-full"
@@ -154,7 +143,6 @@ function Searchbar() {
         >
           <MdLogout size={20} />
         </button>
-      </div>
 
       <div
         className={`notification-drawer fixed right-0 top-0 z-50 flex h-screen w-[380px] max-w-[calc(100vw-20px)] flex-col p-4 shadow-2xl transition-transform ${

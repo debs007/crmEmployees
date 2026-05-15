@@ -2,6 +2,7 @@ import React from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import Home from "./pages/Home";
 import Sidebarpart from "./Components/Sidebar/Sidebarpart";
+import Searchbar from "./Components/search/Searchbar";
 import Attendance from "./pages/Attendance";
 import Chat from "./pages/Chat";
 import CreateChannel from "./pages/CreateChannel";
@@ -27,6 +28,7 @@ import SalesView from "./pages/SalesView";
 import TransferView from "./pages/TransferView";
 import MyPayslips from "./pages/MyPayslips";
 import MyTasks from "./pages/MyTasks";
+import SalarySheet from "./pages/SalarySheet";
 import { useSocketSetup } from "../hooks/useSocketSetup";
 import { useGlobalNotification } from "../hooks/useGlobalNotifications";
 
@@ -51,6 +53,7 @@ function DesktopRouting() {
               <div className="flex min-w-0">
                 <Sidebarpart />
                 <div className="min-w-0 flex-1 border border-orange-400 min-h-screen">
+                  <Searchbar />
                   
                   <Routes>
                     <Route path="/" element={<Home />} />
@@ -80,6 +83,7 @@ function DesktopRouting() {
                     <Route path="/transferview" element={<TransferView/>}/>
                     <Route path="/payslips" element={<MyPayslips/>}/>
                     <Route path="/my-tasks" element={<MyTasks />}/>
+                    <Route path="/salary-sheet" element={<SalarySheet />}/>
 
                   </Routes>
                 </div>
