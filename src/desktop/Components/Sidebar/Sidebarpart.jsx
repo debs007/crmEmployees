@@ -93,6 +93,26 @@ function Sidebarpart() {
       channel();
     });
 
+    // Bubble a channel to the top of the list when a new message arrives —
+    // same WhatsApp behaviour. updateUnread only fires when the user has
+    // unread messages; this covers the case where the user is actively
+    // looking at the channel (so unread stays 0 but the channel should
+    // still move to top).
+    const onNewMessage = (msg) => {
+      if (!msg?.channelId) return;
+      setChannels((prev) => {
+        const idx = prev.findIndex(
+          (c) => c._id?.toString() === msg.channelId?.toString()
+        );
+        if (idx <= 0) return prev; // already at top or not found
+        const updated = [...prev];
+        const [moved] = updated.splice(idx, 1);
+        updated.unshift({ ...moved, lastMessageTime: new Date().toISOString() });
+        return updated;
+      });
+    };
+    socket.on("new-channel-message", onNewMessage);
+
     const fetchPendingTasks = async () => {
       const token = localStorage.getItem("token");
       if (!token) return;
@@ -117,6 +137,7 @@ function Sidebarpart() {
    
     return () => {
       socket.off("updateUnread");
+      socket.off("new-channel-message", onNewMessage);
       socket.off("soft-refresh", fetchPendingTasks);
       clearInterval(taskInterval);
       window.removeEventListener("focus", onFocus);
