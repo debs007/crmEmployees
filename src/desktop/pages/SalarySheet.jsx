@@ -41,10 +41,6 @@ export default function EmployeeSalarySheet() {
     fetch(`${apiBase}/salary-sheet`, { headers: authHeader })
       .then((r) => r.json())
       .then((data) => {
-        if (data?.message?.includes("No employee ID")) {
-          setEmpIdMissing(true);
-          return;
-        }
         const s = data?.sheets || [];
         setSheets(s);
         if (s.length > 0) setSelected(s[0]);
